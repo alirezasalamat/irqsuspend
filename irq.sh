@@ -125,6 +125,8 @@ mlx4_en|mlx5_core)
 			irqmap=( 1  2  3  4  5  6);;
 		green11)
 			irqmap=( 7  8  9 10 11 12  1  2  3  4  5  6);;
+		tilly04) 		# mlx4_core: tilly04 (interface: ens2)
+			irqmap=( 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32);;
 		*)
 			irqmap=( 7  8  9 10 11 12 19 20 21 22 23 24  1  2  3  4  5  6 13 14 15 16 17 18);;
 		esac;;
@@ -146,6 +148,8 @@ mlx4_en|mlx5_core)
 		esac;;
 	esac;;
 esac
+
+# irqmap=( 1  2  3  4  5  6  7  8  9  10  11 )
 
 DEBUG ${irqmap[@]}
 
@@ -257,11 +261,13 @@ while [ $# -gt 0 ]; do
 	setpoll)
 		[ $# -lt 4 ] && usage
 		checkconfig $1 $2 $3 $4 && { shift 4; continue; }
+		echo $PERNAPI
 		$PERNAPI && {
 			for ((q=0;q<$qcntcurr;q++)); do
+				echo $NDCLI;
 				nid=${napimap[q]}
-				sudo $NDCLI --do napi-set --json="{\"id\": $nid, \"gro-flush-timeout\": $2, \"defer-hard-irqs\": $3}" > /dev/null
-				sudo $NDCLI --do napi-set --json="{\"id\": $nid, \"irq-suspend-timeout\": $4}" >/dev/null 2>&1 || echo "irq-suspend-timeout not available"
+				sudo $NDCLI --do napi-set --json="{\"id\": $nid, \"gro-flush-timeout\": $2, \"defer-hard-irqs\": $3}"
+				sudo $NDCLI --do napi-set --json="{\"id\": $nid, \"irq-suspend-timeout\": $4}" 2>&1 || echo "irq-suspend-timeout not available"
 			done
 		} || {
 			sudo sh -c "echo $2 > /sys/class/net/$dev/gro_flush_timeout"
@@ -410,3 +416,4 @@ printf "total   %12d %12d %12d\n" $irqsum $rxpktsum $txpktsum
 printf "drops   %12s %12d %12d\n" "" $rxdrops $txdrops
 
 exit 0
+

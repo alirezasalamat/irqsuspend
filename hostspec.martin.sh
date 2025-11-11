@@ -1,6 +1,6 @@
 SERVER=$1
 MEMCACHED="work/memcached/memcached"; MUTILATE="mutilate"; PERF="/usr/local/perf/bin/perf"; FGDIR="~/work/FlameGraph"
-NDCLI="linux/net-next/tools/net/ynl/pyynl/cli.py --no-schema --output-json --spec linux/net-next/Documentation/netlink/specs/netdev.yaml"
+NDCLI="../linux/net-next/tools/net/ynl/pyynl/cli.py --no-schema --output-json --spec ../linux/net-next/Documentation/netlink/specs/netdev.yaml"
 case $SERVER in
 	husky10)
 		COALESCEd=" on  on 50  na na na 50  na na na  na  na" # default
