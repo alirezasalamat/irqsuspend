@@ -1,7 +1,0 @@
-cache-sql13434: sent    6909070 | retrans          2 | timeout          0 | loss rate   0.000%
-cache-sql13466: sent    7066541 | retrans        715 | timeout        285 | loss rate   0.004%
-cache-sql13430: sent    7059588 | retrans        728 | timeout        307 | loss rate   0.004%
-cache-sql13478: sent    7072710 | retrans        759 | timeout        333 | loss rate   0.005%
-cache-sql13465: sent    9680188 | retrans        694 | timeout        273 | loss rate   0.003%
-cache-sql13431: sent    7059508 | retrans        727 | timeout        298 | loss rate   0.004%
-cache-sql13457: sent    7055387 | retrans        737 | timeout        284 | loss rate   0.004%
