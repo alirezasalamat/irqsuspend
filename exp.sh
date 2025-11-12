@@ -31,9 +31,7 @@ function usage() {
 	echo "  --busy-poll-budget <num>           Set _MP_Budget (busy poll budget)"
 	echo "  --busy-poll-prefer <0|1>           Set _MP_Prefer (busy poll prefer)"
 	echo "  --memcached-extra-flags <flags>    Additional memcached flags"
-	echo "  --fullbusy                         Enable fullbusy mode (sets gro=5000000, defer=100, suspend=0,"
-	echo "                                     busy-poll-usecs=1000, busy-poll-budget=64, busy-poll-prefer=1,"
-	echo "                                     adds -y flag to memcached)"
+	echo "  --fullbusy                         Enable fullbusy mode (adds -y flag to memcached)"
 	echo "  -h, --help                         Show this help"
 	echo ""
 	echo "Examples:"
@@ -113,6 +111,11 @@ function parse_arguments() {
 		for agent in "${AGENT_ARRAY[@]}"; do
 			AGENTS_STRING+=" -a $agent"
 		done
+	fi
+	
+	# Apply fullbusy mode: add -y flag to memcached
+	if $opt_fullbusy; then
+		MEMCACHED_EXTRA_FLAGS="$MEMCACHED_EXTRA_FLAGS -y"
 	fi
 }
 
@@ -295,7 +298,7 @@ function main() {
 	build_memvar
 	validate_configuration
 	display_configuration
-	# configure_irq_settings
+	configure_irq_settings
 	start_memcached
 	run_mutilate_benchmark "${DRIVER_IP}" "${IFACE_IP}" "${AGENTS_STRING}"
 	stop_memcached
