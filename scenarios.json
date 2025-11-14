@@ -1,0 +1,124 @@
+{
+  "scenarios": {
+    "base": {
+      "description": "Baseline configuration",
+      "gro_flush_timeout": 0,
+      "defer_hard_irqs": 0,
+      "irq_suspend_timeout": 0,
+      "busy_poll_usecs": 0,
+      "busy_poll_budget": 0,
+      "busy_poll_prefer": 0,
+      "memcached_extra_flags": ""
+    },
+    "defer20": {
+      "description": "Defer with 20µs GRO timeout",
+      "gro_flush_timeout": 20000,
+      "defer_hard_irqs": 100,
+      "irq_suspend_timeout": 0,
+      "busy_poll_usecs": 0,
+      "busy_poll_budget": 0,
+      "busy_poll_prefer": 0,
+      "memcached_extra_flags": ""
+    },
+    "defer200": {
+      "description": "Defer with 200µs GRO timeout",
+      "gro_flush_timeout": 200000,
+      "defer_hard_irqs": 100,
+      "irq_suspend_timeout": 0,
+      "busy_poll_usecs": 0,
+      "busy_poll_budget": 0,
+      "busy_poll_prefer": 0,
+      "memcached_extra_flags": ""
+    },
+    "napibusy": {
+      "description": "NAPI busy polling mode",
+      "gro_flush_timeout": 0,
+      "defer_hard_irqs": 0,
+      "irq_suspend_timeout": 0,
+      "busy_poll_usecs": 100,
+      "busy_poll_budget": 64,
+      "busy_poll_prefer": 1,
+      "memcached_extra_flags": ""
+    },
+    "fullbusy": {
+      "description": "Full busy polling mode",
+      "gro_flush_timeout": 200000,
+      "defer_hard_irqs": 100,
+      "irq_suspend_timeout": 0,
+      "busy_poll_usecs": 1000,
+      "busy_poll_budget": 64,
+      "busy_poll_prefer": 1,
+      "memcached_extra_flags": "-y"
+    },
+    "suspend10": {
+      "description": "IRQ suspend with 10µs timeout",
+      "gro_flush_timeout": 10000,
+      "defer_hard_irqs": 100,
+      "irq_suspend_timeout": 20000000,
+      "busy_poll_usecs": 0,
+      "busy_poll_budget": 64,
+      "busy_poll_prefer": 1,
+      "memcached_extra_flags": ""
+    },
+    "suspend20": {
+      "description": "IRQ suspend with 20µs timeout",
+      "gro_flush_timeout": 20000,
+      "defer_hard_irqs": 100,
+      "irq_suspend_timeout": 20000000,
+      "busy_poll_usecs": 0,
+      "busy_poll_budget": 64,
+      "busy_poll_prefer": 1,
+      "memcached_extra_flags": ""
+    },
+    "io_uring_base": {
+      "description": "io_uring baseline configuration",
+      "gro_flush_timeout": 0,
+      "defer_hard_irqs": 0,
+      "irq_suspend_timeout": 0,
+      "busy_poll_usecs": 0,
+      "busy_poll_budget": 0,
+      "busy_poll_prefer": 0,
+      "memcached_extra_flags": ""
+    },
+    "io_uring_defer20": {
+      "description": "io_uring Defer with 200µs GRO timeout",
+      "gro_flush_timeout": 20000,
+      "defer_hard_irqs": 100,
+      "irq_suspend_timeout": 0,
+      "busy_poll_usecs": 0,
+      "busy_poll_budget": 0,
+      "busy_poll_prefer": 0,
+      "memcached_extra_flags": ""
+    },
+    "io_uring_defer200": {
+      "description": "io_uring Defer with 200µs GRO timeout",
+      "gro_flush_timeout": 200000,
+      "defer_hard_irqs": 100,
+      "irq_suspend_timeout": 0,
+      "busy_poll_usecs": 0,
+      "busy_poll_budget": 0,
+      "busy_poll_prefer": 0,
+      "memcached_extra_flags": ""
+    },
+    "io_uring_napibusy": {
+      "description": "io_uring with NAPI busy polling",
+      "gro_flush_timeout": 0,
+      "defer_hard_irqs": 0,
+      "irq_suspend_timeout": 0,
+      "busy_poll_usecs": 100,
+      "busy_poll_budget": 0,
+      "busy_poll_prefer": 1,
+      "memcached_extra_flags": ""
+    },
+    "io_uring_fullbusy": {
+      "description": "io_uring with full busy polling",
+      "gro_flush_timeout": 200000,
+      "defer_hard_irqs": 100,
+      "irq_suspend_timeout": 0,
+      "busy_poll_usecs": 100,
+      "busy_poll_budget": 0,
+      "busy_poll_prefer": 1,
+      "memcached_extra_flags": "-y"
+    }
+  }
+}

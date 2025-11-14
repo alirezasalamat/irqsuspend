@@ -2,15 +2,21 @@
 
 source $(dirname $0)/util.sh
 
-# Global variables
 SCRIPT_DIR="$(dirname $0)"
 NDCLI="../linux/net-next/tools/net/ynl/pyynl/cli.py --no-schema --output-json --spec ../linux/net-next/Documentation/netlink/specs/netdev.yaml"
 
-# Configuration variables (will be set by parse_arguments)
 declare -g IFACE IRQ_COUNT CPUSET GRO_TIMEOUT DEFER_IRQS SUSPEND_TIMEOUT
 declare -g MEMCACHED_DIR OTHER_CPUS DRIVER_IP AGENT_IPS AGENTS_STRING IFACE_IP MEMCACHED_BIN
 declare -g BUSY_POLL_USECS BUSY_POLL_BUDGET BUSY_POLL_PREFER
 declare -g MEMCACHED_EXTRA_FLAGS MEMVAR MEMCACHED_PID
+declare -g OUTPUT_DIR OUTPUT_CSV EXPERIMENT_DURATION
+declare -g IRQ_CONFIG_CACHE="/tmp/exp_irq_config_cache.txt"
+declare -g VERBOSITY=0
+declare -g SCENARIO_NAME=""
+
+function log_info() { echo "$@"; }
+function log_verbose() { [ $VERBOSITY -ge 1 ] && echo "$@"; }
+function log_debug() { [ $VERBOSITY -ge 2 ] && echo "$@"; }
 
 function usage() {
 	echo "Usage: $(basename $0) <interface> <options>"
@@ -32,6 +38,11 @@ function usage() {
 	echo "  --busy-poll-prefer <0|1>           Set _MP_Prefer (busy poll prefer)"
 	echo "  --memcached-extra-flags <flags>    Additional memcached flags"
 	echo "  --fullbusy                         Enable fullbusy mode (adds -y flag to memcached)"
+	echo "  --output-dir <path>                Output directory for results (default: ./results)"
+	echo "  --duration <sec>                   Experiment duration in seconds (default: 20)"
+	echo "  --scenario-name <name>             Name for this scenario (for CSV output)"
+	echo "  -v,                                Verbose output (show configuration steps)"
+	echo "  -vv                                Very verbose output (show all details)"
 	echo "  -h, --help                         Show this help"
 	echo ""
 	echo "Examples:"
@@ -58,9 +69,10 @@ function initialize_defaults() {
 	BUSY_POLL_PREFER=0
 	MEMCACHED_EXTRA_FLAGS=""
 	opt_fullbusy=false
+	OUTPUT_DIR="./results"
+	EXPERIMENT_DURATION=5
 }
 
-# Parse command-line arguments
 function parse_arguments() {
 	[ $# -lt 1 ] && usage
 	IFACE=$1
@@ -96,6 +108,16 @@ function parse_arguments() {
 				AGENT_IPS=$2; shift 2;;
 			--fullbusy)
 				opt_fullbusy=true; shift 1;;
+			--output-dir)
+				OUTPUT_DIR=$2; shift 2;;
+			--duration)
+				EXPERIMENT_DURATION=$2; shift 2;;
+			--scenario-name)
+				SCENARIO_NAME=$2; shift 2;;
+			-vv)
+				VERBOSITY=2; shift 1;;
+			-v)
+				VERBOSITY=1; shift 1;;
 			-h|--help)
 				usage;;
 			*)
@@ -104,7 +126,6 @@ function parse_arguments() {
 		esac
 	done
 	
-	# Build agents string if agent IPs provided
 	if [ -n "$AGENT_IPS" ]; then
 		AGENTS_STRING=""
 		IFS=',' read -ra AGENT_ARRAY <<< "$AGENT_IPS"
@@ -113,13 +134,9 @@ function parse_arguments() {
 		done
 	fi
 	
-	# Apply fullbusy mode: add -y flag to memcached
-	if $opt_fullbusy; then
-		MEMCACHED_EXTRA_FLAGS="$MEMCACHED_EXTRA_FLAGS -y"
-	fi
+	$opt_fullbusy && MEMCACHED_EXTRA_FLAGS="$MEMCACHED_EXTRA_FLAGS -y"
 }
 
-# Build environment variables for memcached
 function build_memvar() {
 	MEMVAR=""
 	[ -n "$BUSY_POLL_USECS" ] && MEMVAR+="_MP_Usecs=$BUSY_POLL_USECS "
@@ -128,7 +145,31 @@ function build_memvar() {
 	MEMVAR=$(echo "$MEMVAR" | sed 's/ $//')
 }
 
-# Validate all configuration parameters
+function parse_and_save_results() {
+	local output_file="$1"
+	local scenario_name="$2"
+	local total_irqs_fired="${3:-0}"
+	
+	[[ ! -f "$output_file" ]] && { echo "WARNING: Output file not found: $output_file"; return 1; }
+	
+	local hostname=$(hostname)
+	local qps=$(awk '/Total QPS/ {print $4}' "$output_file")
+	local avg_read_latency=$(awk '/^read/ {print $2}' "$output_file")
+	local latency_99th_read=$(awk '/^read/ {print $10}' "$output_file")
+	local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+	
+	[[ -z "$qps" ]] && { echo "WARNING: Could not parse QPS from output file"; return 1; }
+	
+	echo "$hostname,$scenario_name,$IRQ_COUNT,$CPUSET,$GRO_TIMEOUT,$DEFER_IRQS,$SUSPEND_TIMEOUT,$BUSY_POLL_USECS,$BUSY_POLL_BUDGET,$BUSY_POLL_PREFER,$total_irqs_fired,$qps,$avg_read_latency,$latency_99th_read,$EXPERIMENT_DURATION,$timestamp" >> "$OUTPUT_CSV"
+	
+	log_info ">>> Results: QPS=$qps, Avg=${avg_read_latency}ms, p99=${latency_99th_read}ms"
+	log_verbose ">>> Results saved to: $OUTPUT_CSV"
+	log_debug "    Hostname: $hostname"
+	log_debug "    Scenario: $scenario_name"
+	log_debug "    Cores: $IRQ_COUNT"
+	log_verbose ""
+}
+
 function validate_configuration() {
 	[ -z "$IRQ_COUNT" ] && ERROR "IRQ count (-i) is required"
 	[ -z "$CPUSET" ] && ERROR "CPU set (-c) is required"
@@ -143,70 +184,94 @@ function validate_configuration() {
 
 	IFACE_IP=$(ip -4 addr show $IFACE | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
 	[ -z "$IFACE_IP" ] && ERROR "Could not determine IP address for interface $IFACE"
+	
+	mkdir -p "$OUTPUT_DIR"
+	OUTPUT_CSV="$OUTPUT_DIR/results.csv"
+	
+	[[ ! -f "$OUTPUT_CSV" ]] && \
+		echo "hostname,scenario,cores,cpuset,gro_flush_timeout,defer_hard_irqs,irq_suspend_timeout,busy_poll_usecs,busy_poll_budget,busy_poll_prefer,total_irqs_fired,QPS,avg_read_latency,latency_99th_read,duration,timestamp" > "$OUTPUT_CSV"
 }
 
-# Display experiment configuration
 function display_configuration() {
-	echo "========================================="
-	echo "Experiment Configuration"
-	echo "========================================="
-	echo "Interface:        $IFACE"
-	echo "Interface IP:     $IFACE_IP"
-	echo "Driver IP:        $DRIVER_IP"
-	echo "Agent IPs:        ${AGENT_IPS:-none (driver only)}"
-	echo "IRQ Count:        $IRQ_COUNT"
-	echo "CPU Set:          $CPUSET"
-	echo "Other CPUs:       ${OTHER_CPUS:-none}"
-	echo "GRO Timeout:      $GRO_TIMEOUT µs"
-	echo "Defer IRQs:       $DEFER_IRQS"
-	echo "Suspend Timeout:  $SUSPEND_TIMEOUT µs"
-	echo "Busy Poll Usecs:  ${BUSY_POLL_USECS:-none}"
-	echo "Busy Poll Budget: ${BUSY_POLL_BUDGET:-none}"
-	echo "Busy Poll Prefer: ${BUSY_POLL_PREFER:-none}"
-	echo "Memcached Dir:    $MEMCACHED_DIR"
-	echo "Extra Flags:      ${MEMCACHED_EXTRA_FLAGS:-none}"
-	echo "========================================="
-	echo ""
+	log_verbose "========================================="
+	log_verbose "Experiment Configuration"
+	log_verbose "========================================="
+	log_verbose "Interface:        $IFACE"
+	log_verbose "Interface IP:     $IFACE_IP"
+	log_verbose "Driver IP:        $DRIVER_IP"
+	log_verbose "Agent IPs:        ${AGENT_IPS:-none (driver only)}"
+	log_verbose "IRQ Count:        $IRQ_COUNT"
+	log_verbose "CPU Set:          $CPUSET"
+	log_verbose "Other CPUs:       ${OTHER_CPUS:-none}"
+	log_verbose "GRO Timeout:      $GRO_TIMEOUT µs"
+	log_verbose "Defer IRQs:       $DEFER_IRQS"
+	log_verbose "Suspend Timeout:  $SUSPEND_TIMEOUT µs"
+	log_verbose "Busy Poll Usecs:  ${BUSY_POLL_USECS:-none}"
+	log_verbose "Busy Poll Budget: ${BUSY_POLL_BUDGET:-none}"
+	log_verbose "Busy Poll Prefer: ${BUSY_POLL_PREFER:-none}"
+	log_verbose "Memcached Dir:    $MEMCACHED_DIR"
+	log_verbose "Extra Flags:      ${MEMCACHED_EXTRA_FLAGS:-none}"
+	log_verbose "========================================="
+	log_verbose ""
 }
 
-# Configure IRQ settings
+function check_irq_config_changed() {
+	local current_config="${IFACE}|${IRQ_COUNT}|${CPUSET}|${OTHER_CPUS}|${GRO_TIMEOUT}|${DEFER_IRQS}|${SUSPEND_TIMEOUT}"
+	
+	[[ ! -f "$IRQ_CONFIG_CACHE" ]] && { echo "$current_config" > "$IRQ_CONFIG_CACHE"; return 1; }
+	
+	local cached_config=$(cat "$IRQ_CONFIG_CACHE")
+	if [[ "$current_config" == "$cached_config" ]]; then
+		return 0
+	else
+		echo "$current_config" > "$IRQ_CONFIG_CACHE"
+		return 1
+	fi
+}
+
 function configure_irq_settings() {
-	echo ">>> Setting queue count to $IRQ_COUNT"
+	if check_irq_config_changed; then
+		log_verbose "========================================="
+		log_verbose ">>> IRQ configuration unchanged, skipping..."
+		log_verbose "========================================="
+		log_verbose ""
+		log_debug ">>> Current IRQ configuration:"
+		[ $VERBOSITY -ge 2 ] && NDCLI="$NDCLI" "$SCRIPT_DIR/irq.sh" $IFACE show
+		log_verbose ""
+		return 0
+	fi
+	
+	log_verbose ">>> Setting queue count to $IRQ_COUNT"
 	NDCLI="$NDCLI" "$SCRIPT_DIR/irq.sh" $IFACE setq $IRQ_COUNT
 
-	if [ -n "$OTHER_CPUS" ]; then
-		echo ">>> Setting other IRQs to CPU set: $OTHER_CPUS"
+	[ -n "$OTHER_CPUS" ] && {
+		log_verbose ">>> Setting other IRQs to CPU set: $OTHER_CPUS"
 		NDCLI="$NDCLI" "$SCRIPT_DIR/irq.sh" $IFACE setirqN $OTHER_CPUS 0 0
-	fi
+	}
 
-	echo ">>> Binding IRQs 1:1 to CPU set: $CPUSET"
+	log_verbose ">>> Binding IRQs 1:1 to CPU set: $CPUSET"
 	NDCLI="$NDCLI" "$SCRIPT_DIR/irq.sh" $IFACE setirq1 $CPUSET 0 $IRQ_COUNT
 
-	echo ">>> Setting poll parameters (gro=$GRO_TIMEOUT, defer=$DEFER_IRQS, suspend=$SUSPEND_TIMEOUT)"
-	NDCLI="$NDCLI" "$SCRIPT_DIR/irq.sh" $IFACE setpoll $GRO_TIMEOUT $DEFER_IRQS $SUSPEND_TIMEOUT
+	log_verbose ">>> Setting poll parameters (gro=$GRO_TIMEOUT, defer=$DEFER_IRQS, suspend=$SUSPEND_TIMEOUT)"
+	NDCLI="$NDCLI" "$SCRIPT_DIR/irq.sh" $IFACE setpoll $GRO_TIMEOUT $DEFER_IRQS $SUSPEND_TIMEOUT >/dev/null 2>&1
 
-	echo ""
-	echo ">>> Current IRQ configuration:"
-	NDCLI="$NDCLI" "$SCRIPT_DIR/irq.sh" $IFACE show
-
-	echo ""
-	echo "========================================="
-	echo "Configuration complete!"
-	echo "========================================="
-	echo ""
+	log_verbose ""
+	log_debug ">>> Current IRQ configuration:"
+	[ $VERBOSITY -ge 2 ] && NDCLI="$NDCLI" "$SCRIPT_DIR/irq.sh" $IFACE show
+	log_verbose ""
 }
 
-# Start memcached server
 function start_memcached() {
+	ulimit -Sn 65536
 	local MEMCACHED_ARGS="-t $IRQ_COUNT -N $IRQ_COUNT -p 11212 -b 16384 -c 32768 -m 2048"
 	MEMCACHED_ARGS+=" -o hashpower=24,no_lru_maintainer,no_lru_crawler"
 	MEMCACHED_ARGS+=" -l $IFACE_IP -u $USER $MEMCACHED_EXTRA_FLAGS"
 	local MEMCACHED_CMD="$MEMVAR taskset -c $CPUSET $MEMCACHED_BIN $MEMCACHED_ARGS"
 
-	echo ">>> Starting memcached:"
-	[ -n "$MEMVAR" ] && echo "    Environment: $MEMVAR"
-	echo "    Command: taskset -c $CPUSET $MEMCACHED_BIN $MEMCACHED_ARGS"
-	echo ""
+	log_verbose ">>> Starting memcached:"
+	[ -n "$MEMVAR" ] && log_debug "    Environment: $MEMVAR"
+	log_debug "    Command: taskset -c $CPUSET $MEMCACHED_BIN $MEMCACHED_ARGS"
+	log_verbose ""
 
 	killall -q memcached 2>/dev/null
 	sleep 1
@@ -214,63 +279,96 @@ function start_memcached() {
 	eval $MEMCACHED_CMD &
 	MEMCACHED_PID=$!
 
-	echo ">>> Memcached started with PID: $MEMCACHED_PID"
-	echo ">>> Listening on: $IFACE_IP:11212"
-	echo ""
+	log_verbose ">>> Memcached started with PID: $MEMCACHED_PID"
+	log_verbose ">>> Listening on: $IFACE_IP:11212"
+	log_verbose ""
 }
 
-# Run mutilate benchmarks with agents
-# Args: $1 = driver SSH IP, $2 = server IP, $3 = agents string
 function run_mutilate_benchmark() {
 	local DRIVER_IP="$1"
 	local SERVER_IP="$2"
 	local AGENTS_STR="$3"
 	local SERVER_PORT="11212"
 	local MUTILATE_BIN="/home/alireza/workspace/mutilate/mutilate"
-	local CPUSET="0-15"
-	local THREADS=16
 	local FILE_SUFFIX="${file:-default}"
-	local MUTILATE="taskset -c 0-15 $MUTILATE_BIN -T 16 -s $SERVER_IP:$SERVER_PORT -u 0.03 -d 1 -K fb_key -V fb_value -i fb_ia -r 1000000"
+	local MUTILATE="taskset -c 0-7 $MUTILATE_BIN -T 8 -s $SERVER_IP:$SERVER_PORT -u 0.03 -d 1 -K fb_key -V fb_value -i fb_ia -r 1000000"
 	
-	# Start agents on remote machines if agent IPs provided
 	if [ -n "$AGENT_IPS" ]; then
-		echo ">>> Starting mutilate agents on: $AGENT_IPS"
+		log_verbose ">>> Starting mutilate agents on: $AGENT_IPS"
 		IFS=',' read -ra AGENT_ARRAY <<< "$AGENT_IPS"
 		for agent in "${AGENT_ARRAY[@]}"; do
-			echo "    Starting agent on $agent"
-			ssh "alireza@${agent}" "${MUTILATE_BIN} -A" 2>/dev/null &
+			log_debug "    Starting agent on $agent"
+			ssh "alireza@${agent}" taskset -c 0-7 "${MUTILATE_BIN} -A -T 8" 2>/dev/null &
 		done
 		sleep 2
 		
-		# Check if agents are listening on port 5556
 		for agent in "${AGENT_ARRAY[@]}"; do
 			timeout 5 bash -c "until nc -z $agent 5556; do sleep 0.1; done" 2>/dev/null || \
-				echo "WARNING: Agent on $agent may not be ready"
+				log_verbose "WARNING: Agent on $agent may not be ready"
 		done
 	fi
 	
-	# LOAD phase
-	echo ">>> Running LOAD phase"
-	timeout 40s ssh "alireza@${DRIVER_IP}" \
-		"${MUTILATE} --loadonly" \
-		|| echo "LOAD FAILED" >> "memcached-${FILE_SUFFIX}.out"
+	log_verbose ">>> Running LOAD phase"
+	local max_retries=3
+	local retry_count=0
+	local load_success=false
+	
+	while [ $retry_count -lt $max_retries ] && [ "$load_success" = false ]; do
+		if [ $retry_count -gt 0 ]; then
+			log_info ">>> LOAD phase timed out. Restarting memcached and retrying (attempt $((retry_count + 1))/$max_retries)..."
+			
+			# Kill and restart memcached
+			killall -9 memcached 2>/dev/null
+			sleep 2
+			
+			# Restart memcached using the start_memcached function
+			start_memcached
+		fi
+		
+		# Try to load data
+		if timeout 10s ssh "alireza@${DRIVER_IP}" \
+			"${MUTILATE_BIN} --loadonly -s $SERVER_IP:$SERVER_PORT -K fb_key -V fb_value -i fb_ia -r 1000000" >/dev/null 2>&1; then
+			load_success=true
+			log_verbose ">>> LOAD phase completed successfully"
+		else
+			((retry_count++))
+			if [ $retry_count -ge $max_retries ]; then
+				log_info "ERROR: LOAD phase failed after $max_retries attempts"
+				echo "LOAD FAILED" >> "memcached-${FILE_SUFFIX}.out"
+				return 1
+			fi
+		fi
+	done
 	
 	# WARM UP phase
-	echo ">>> Running WARM UP phase"
-	echo "${MUTILATE} ${AGENTS_STR} --noload -t 5"
-	timeout 10s ssh "alireza@${DRIVER_IP}" \
-		"${MUTILATE} ${AGENTS_STR} --noload -t 5 -c 16 -q 0" 
-		>/dev/null 2>&1 || echo "WARMUP FAILED" >> "memcached-${FILE_SUFFIX}.out"
+	log_verbose ">>> Running WARM UP phase"
+	log_debug "${MUTILATE} ${AGENTS_STR} --noload -t 10 -c 16 -q 0"
+	timeout 30s ssh "alireza@${DRIVER_IP}" \
+		"${MUTILATE} ${AGENTS_STR} --noload -t 1 -c 16 -q 0" \
+		>/dev/null 2>&1 || log_verbose "WARMUP FAILED" >> "memcached-${FILE_SUFFIX}.out"
 	
 	# RUN phase (actual experiment)
-	echo ">>> Running EXPERIMENT phase"
-	echo "${MUTILATE} ${AGENTS_STR} --noload -t 20 -q 0"
-	timeout 40s ssh "alireza@${DRIVER_IP}" \
-		"${MUTILATE} ${AGENTS_STR} --noload -t 20 -c 16 -q 0"
-	
+	local SCENARIO_NAME="${4:-experiment}"
+	local TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+	local OUTPUT_FILE="${OUTPUT_DIR}/mutilate-${SCENARIO_NAME}-${TIMESTAMP}.txt"
+
+	./irq.sh "$IFACE" count > /dev/null 2>&1
+
+	log_info ">>> Running experiment: ${SCENARIO_NAME} (duration: ${EXPERIMENT_DURATION}s)"
+	log_debug "${MUTILATE} ${AGENTS_STR} --noload -t ${EXPERIMENT_DURATION} -c 16 -q 0"
+	timeout $((EXPERIMENT_DURATION + 20)) ssh "alireza@${DRIVER_IP}" \
+		"${MUTILATE} ${AGENTS_STR} --noload -t ${EXPERIMENT_DURATION} -c 16 -q 0" \
+		| tee "$OUTPUT_FILE"
+
+	# Capture IRQ stats after the run and parse total fired
+	IRQ_TMP_FILE=$(mktemp)
+	./irq.sh "$IFACE" count > "$IRQ_TMP_FILE" 2>/dev/null || true
+	local total_irqs_fired=$(awk '/^total/ {print $2}' "$IRQ_TMP_FILE" | tr -d ' ')
+	rm -f "$IRQ_TMP_FILE"
+
 	# Stop agents if they were started
 	if [ -n "$AGENT_IPS" ]; then
-		echo ">>> Stopping mutilate agents"
+		log_debug ">>> Stopping mutilate agents"
 		IFS=',' read -ra AGENT_ARRAY <<< "$AGENT_IPS"
 		for agent in "${AGENT_ARRAY[@]}"; do
 			ssh "alireza@${agent}" "killall -q mutilate" 2>/dev/null || true
@@ -279,15 +377,23 @@ function run_mutilate_benchmark() {
 	
 	# Stop driver mutilate processes
 	ssh "alireza@${DRIVER_IP}" "killall -q mutilate" 2>/dev/null || true
+	
+	# Parse and save results
+	log_verbose ""
+	parse_and_save_results "$OUTPUT_FILE" "$SCENARIO_NAME" "$total_irqs_fired"
+	
+	# Clean up temporary output file
+	rm -f "$OUTPUT_FILE"
+	log_debug ">>> Cleaned up temporary output file"
 }
 
 # Stop memcached server
 function stop_memcached() {
-	echo ""
-	echo "To stop memcached:"
-	echo "  kill $MEMCACHED_PID"
-	echo "  or: killall memcached"
-	echo ""
+	log_verbose ""
+	log_verbose "To stop memcached:"
+	log_verbose "  kill $MEMCACHED_PID"
+	log_verbose "  or: killall memcached"
+	log_verbose ""
 	killall memcached
 }
 
@@ -300,7 +406,11 @@ function main() {
 	display_configuration
 	configure_irq_settings
 	start_memcached
-	run_mutilate_benchmark "${DRIVER_IP}" "${IFACE_IP}" "${AGENTS_STRING}"
+	
+	# Use provided scenario name or build from parameters
+	local scenario_name="${SCENARIO_NAME:-gro${GRO_TIMEOUT}_defer${DEFER_IRQS}_suspend${SUSPEND_TIMEOUT}}"
+	run_mutilate_benchmark "${DRIVER_IP}" "${IFACE_IP}" "${AGENTS_STRING}" "${scenario_name}"
+	
 	stop_memcached
 }
 

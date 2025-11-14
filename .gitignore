@@ -1,0 +1,9 @@
+my_env/
+results/
+*.log
+*.tmp
+.DS_Store
+*.swp
+.vscode/
+*.out
+build/

@@ -2,6 +2,8 @@
 
 source $(dirname $0)/util.sh
 
+NDCLI="../linux/net-next/tools/net/ynl/pyynl/cli.py --no-schema --output-json --spec ../linux/net-next/Documentation/netlink/specs/netdev.yaml"
+
 function checkconfig() {
   $opt_preserve || return 1
   [ -f $cfgfile ] && grep -q "$*$" $cfgfile && return 0
